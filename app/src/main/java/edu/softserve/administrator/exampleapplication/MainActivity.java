@@ -1,14 +1,26 @@
 package edu.softserve.administrator.exampleapplication;
 
+import android.app.ProgressDialog;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.BitmapDrawable;
 import android.os.AsyncTask;
+import android.os.PersistableBundle;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
+import android.widget.ImageView;
+import android.widget.ProgressBar;
+import android.widget.RelativeLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.softserve.administrator.exampleapplication.R;
+import com.squareup.picasso.Callback;
+import com.squareup.picasso.Picasso;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -23,26 +35,50 @@ import java.nio.charset.Charset;
 
 public class MainActivity extends AppCompatActivity {
     private static final String OPEN_WEATHER_MAP_API = "http://api.openweathermap.org/data/2.5/weather?q=Boston&units=metric";
+    private static final String ICON_BASE_URL = "http://openweathermap.org/img/w/";
+    private static final String IS_WEATHER_LOADED = "IS_WEATHER_LOADED";
+    private boolean mIsWeatherLoaded = false;
+
     private TextView mTemperatureTextView;
     private TextView mWindTextView;
     private TextView mPressureTextView;
     private TextView mHumidityTextView;
-    private TextView mSunriseTextView;
-    private TextView mSunsetTextView;
+    private TextView mTitle;
+    private ImageView mWeatherIconImageView;
+    private RelativeLayout mContentView;
+
+    private ProgressDialog mProgressDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         setContentView(R.layout.activity_main);
         mTemperatureTextView = (TextView) findViewById(R.id.temperature);
         mWindTextView = (TextView) findViewById(R.id.wind);
         mPressureTextView = (TextView)findViewById(R.id.pressure);
         mHumidityTextView = (TextView)findViewById(R.id.humidity);
+        mTitle = (TextView) findViewById(R.id.title);
+        mWeatherIconImageView = (ImageView) findViewById(R.id.weatherIcon);
+        mContentView = (RelativeLayout) findViewById(R.id.content);
 
-        WeatherAsyncTask weatherAsyncTask = new WeatherAsyncTask();
-        weatherAsyncTask.execute(OPEN_WEATHER_MAP_API);
+        mIsWeatherLoaded = savedInstanceState != null && savedInstanceState.getBoolean(IS_WEATHER_LOADED);
+        if (!mIsWeatherLoaded) {
+            WeatherAsyncTask weatherAsyncTask = new WeatherAsyncTask();
+            weatherAsyncTask.execute(OPEN_WEATHER_MAP_API);
+        } else {
+            mTitle.setText(WeatherData.getInstance().description);
+            mTemperatureTextView.setText(WeatherData.getInstance().temperature);
+            mWindTextView.setText(WeatherData.getInstance().windSpeed);
+            mPressureTextView.setText(WeatherData.getInstance().pressure);
+            mHumidityTextView.setText(WeatherData.getInstance().humidity);
+            mWeatherIconImageView.setImageBitmap(WeatherData.getInstance().icon);
+        }
+    }
 
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        outState.putBoolean(IS_WEATHER_LOADED, mIsWeatherLoaded);
+        super.onSaveInstanceState(outState);
     }
 
     @Override
@@ -67,17 +103,40 @@ public class MainActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 
-    private class WeatherAsyncTask extends AsyncTask<String, Void, JSONObject> {
+    private class WeatherAsyncTask extends AsyncTask<String, Integer, JSONObject> {
+        @Override
+        protected void onPreExecute() {
+            mContentView.setVisibility(View.GONE);
+            mProgressDialog = new ProgressDialog(MainActivity.this);
+            mProgressDialog.setMessage("Asking Boston commons... already inquired:");
+            mProgressDialog.setIndeterminate(false);
+            mProgressDialog.setMax(100);
+            mProgressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+            mProgressDialog.setCancelable(false);
+            mProgressDialog.show();
+        }
 
+        @Override
+        protected void onProgressUpdate(Integer... values) {
+            mProgressDialog.setProgress(values[0]);
+        }
 
         @Override
         protected JSONObject doInBackground(String... params){
-            URL url = null;
             InputStream is = null;
             JSONObject json = null;
 
             try {
-                url = new URL(params[0]);
+                for (int i = 0; i < 100; i++) {
+                    Thread.sleep(50);
+                    publishProgress((i + 1));
+                }
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            try {
+                URL url = new URL(params[0]);
                 is = url.openStream();
 
                 BufferedReader rd = new BufferedReader(new InputStreamReader(is, Charset.forName("UTF-8")));
@@ -85,7 +144,6 @@ public class MainActivity extends AppCompatActivity {
                 json = new JSONObject(jsonText);
             } catch (IOException|JSONException ex) {
                 ex.printStackTrace();
-
             } finally {
                 try {
                     is.close();
@@ -111,23 +169,43 @@ public class MainActivity extends AppCompatActivity {
             try {
                 Log.v("", jsonObject.toString());
                 JSONObject main = jsonObject.getJSONObject("main");
-                mTemperatureTextView.setText("Temperature: " + main.getString("temp") + "\u00b0 C");
-                mWindTextView.setText("Wind speed: " + jsonObject.getJSONObject("wind").getString("speed") + "m/s");
-                mHumidityTextView.setText("Humidity: " + main.getString("humidity") + "%");
-                mPressureTextView.setText("Pressure : " + main.getString("pressure") + " hpa");
-                JSONObject sys = jsonObject.getJSONObject("sys");
-            //    Date sunrise= new Date(Integer.getInteger(sys.getString("sunrise"))*1000);
-            //    Date sunset = new Date(Integer.getInteger(sys.getString("sunset"))*1000);
-             //   DateFormat df = new SimpleDateFormat("HH:mm:ss");
+                JSONObject weatherDescription = jsonObject.getJSONArray("weather").getJSONObject(0);
 
-            //    mSunriseTextView.setText("Sunrise : " + df.format(sunrise));
-            //    mSunsetTextView.setText("Sunset : " + df.format(sunset));
+                WeatherData.getInstance().description = weatherDescription.getString("main") + ": " + weatherDescription.getString("description");
+                WeatherData.getInstance().temperature = "Temperature: " + main.getString("temp") + "\u00b0 C";
+                WeatherData.getInstance().windSpeed = "Wind speed: " + jsonObject.getJSONObject("wind").getString("speed") + "m/s";
+                WeatherData.getInstance().humidity = "Humidity: " + main.getString("humidity") + "%";
+                WeatherData.getInstance().pressure = "Pressure : " + main.getString("pressure") + " hpa";
 
-            }catch(JSONException ex) {
+                Picasso.with(getApplicationContext())
+                    .load(ICON_BASE_URL + jsonObject.getJSONArray("weather").getJSONObject(0).getString("icon") + ".png")
+                    .into(mWeatherIconImageView, new Callback() {
+                        @Override
+                        public void onSuccess() {
+                            mIsWeatherLoaded = true;
+                            mProgressDialog.dismiss();
+                            mContentView.setVisibility(View.VISIBLE);
+                            WeatherData.getInstance().icon = ((BitmapDrawable) mWeatherIconImageView.getDrawable()).getBitmap();
+
+                            if (mIsWeatherLoaded) {
+                                mTitle.setText(WeatherData.getInstance().description);
+                                mTemperatureTextView.setText(WeatherData.getInstance().temperature);
+                                mWindTextView.setText(WeatherData.getInstance().windSpeed);
+                                mPressureTextView.setText(WeatherData.getInstance().pressure);
+                                mHumidityTextView.setText(WeatherData.getInstance().humidity);
+                                mWeatherIconImageView.setImageBitmap(WeatherData.getInstance().icon);
+                            }
+                        }
+
+                        @Override
+                        public void onError() {
+                            Toast.makeText(getApplicationContext(), "Unnable to load weather icon status", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+
+            } catch(JSONException ex) {
                 ex.printStackTrace();
             }
         }
-
-
     }
 }
